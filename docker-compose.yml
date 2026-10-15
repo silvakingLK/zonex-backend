@@ -1,0 +1,14 @@
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_USER: zonex
+      POSTGRES_PASSWORD: zonex
+      POSTGRES_DB: zonex
+    ports:
+      - "5432:5432"
+    volumes:
+      # O Postgres executa *.sql em ordem alfabética na 1ª inicialização.
+      # Cada *.down.sql roda ANTES do seu *.up.sql e é idempotente (IF EXISTS), então é inofensivo.
+      # Em produção use golang-migrate: migrate -path migrations -database "$DATABASE_URL" up
+      - ./migrations:/docker-entrypoint-initdb.d:ro
