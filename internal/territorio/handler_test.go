@@ -245,3 +245,167 @@ func deref(p *int64) int64 {
 	}
 	return *p
 }
+
+func (a *ambiente) conquistarPoligono(t *testing.T, usuarioHeader string, corpo any) (*httptest.ResponseRecorder, ConquerPolygonResponse) {
+	t.Helper()
+	var buf bytes.Buffer
+	switch v := corpo.(type) {
+	case string:
+		buf.WriteString(v)
+	default:
+		_ = json.NewEncoder(&buf).Encode(v)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/territorios/conquistar-poligono", &buf)
+	req.Header.Set("Content-Type", "application/json")
+	if usuarioHeader != "" {
+		req.Header.Set("X-Usuario-ID", usuarioHeader)
+	}
+	rec := httptest.NewRecorder()
+	a.router.ServeHTTP(rec, req)
+
+	var res ConquerPolygonResponse
+	_ = json.Unmarshal(rec.Body.Bytes(), &res)
+	return rec, res
+}
+
+func TestConquistarPoligono_Sucesso(t *testing.T) {
+	a := novoAmbiente(t)
+
+	// Polígono fechado em torno da Av. Paulista
+	pontos := []PointDto{
+		{Latitude: tLat, Longitude: tLng},
+		{Latitude: tLat, Longitude: tLng + 0.002},
+		{Latitude: tLat + 0.002, Longitude: tLng + 0.002},
+		{Latitude: tLat + 0.002, Longitude: tLng},
+	}
+
+	payload := ConquerPolygonRequest{
+		AtividadeID:     10,
+		Pontos:          pontos,
+		DistanciaMetros: 500.5,
+	}
+
+	// 1. Testa com X-Usuario-ID informado
+	rec, res := a.conquistarPoligono(t, "42", payload)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("esperava HTTP 200, obteve %d: %s", rec.Code, rec.Body.String())
+	}
+	if !res.Sucesso {
+		t.Fatalf("esperava sucesso=true, obteve false. Mensagem: %s", res.Mensagem)
+	}
+	if res.AreaM2 <= 0 {
+		t.Fatalf("esperava areaM2 > 0, obteve %f", res.AreaM2)
+	}
+
+	conquistas := a.repo.ListarConquistasPoligono()
+	if len(conquistas) != 1 {
+		t.Fatalf("esperava 1 conquista salva no repositório, obteve %d", len(conquistas))
+	}
+	if conquistas[0].UsuarioID != 42 {
+		t.Errorf("usuario_id = %d, esperado 42", conquistas[0].UsuarioID)
+	}
+	if conquistas[0].AreaM2 != res.AreaM2 {
+		t.Errorf("area_m2 salva = %f, resposta = %f", conquistas[0].AreaM2, res.AreaM2)
+	}
+
+	// 2. Testa sem X-Usuario-ID (deve assumir ID padrão 1)
+	rec2, res2 := a.conquistarPoligono(t, "", payload)
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("esperava HTTP 200, obteve %d", rec2.Code)
+	}
+	if !res2.Sucesso {
+		t.Fatalf("esperava sucesso=true, obteve false")
+	}
+	conquistas2 := a.repo.ListarConquistasPoligono()
+	if len(conquistas2) != 2 || conquistas2[1].UsuarioID != 1 {
+		t.Fatalf("esperava conquista com usuarioID padrão 1, obteve %+v", conquistas2[1])
+	}
+
+	// 3. Testa com X-Usuario-ID inválido (erro de parse -> assume padrão 1)
+	rec3, res3 := a.conquistarPoligono(t, "nao-eh-numero", payload)
+	if rec3.Code != http.StatusOK {
+		t.Fatalf("esperava HTTP 200, obteve %d", rec3.Code)
+	}
+	if !res3.Sucesso {
+		t.Fatalf("esperava sucesso=true, obteve false")
+	}
+	conquistas3 := a.repo.ListarConquistasPoligono()
+	if len(conquistas3) != 3 || conquistas3[2].UsuarioID != 1 {
+		t.Fatalf("esperava usuarioID padrão 1 após erro de parse, obteve %+v", conquistas3[2])
+	}
+}
+
+func TestConquistarPoligono_Validacoes(t *testing.T) {
+	a := novoAmbiente(t)
+
+	casos := []struct {
+		nome        string
+		corpo       any
+		esperaErro  string
+		esperaCode  int
+	}{
+		{
+			nome: "menos de 3 coordenadas (apenas 2 pontos)",
+			corpo: ConquerPolygonRequest{
+				AtividadeID: 1,
+				Pontos: []PointDto{
+					{Latitude: tLat, Longitude: tLng},
+					{Latitude: tLat + 0.001, Longitude: tLng + 0.001},
+				},
+			},
+			esperaCode: http.StatusBadRequest,
+		},
+		{
+			nome: "lista de pontos vazia",
+			corpo: ConquerPolygonRequest{
+				AtividadeID: 1,
+				Pontos:      []PointDto{},
+			},
+			esperaCode: http.StatusBadRequest,
+		},
+		{
+			nome:       "JSON malformatado",
+			corpo:      `{"pontos": [{"latitude": }`,
+			esperaCode: http.StatusBadRequest,
+		},
+		{
+			nome: "coordenada geográfica inválida (lat > 90)",
+			corpo: ConquerPolygonRequest{
+				AtividadeID: 1,
+				Pontos: []PointDto{
+					{Latitude: 95.0, Longitude: tLng},
+					{Latitude: tLat, Longitude: tLng + 0.001},
+					{Latitude: tLat + 0.001, Longitude: tLng + 0.001},
+				},
+			},
+			esperaCode: http.StatusBadRequest,
+		},
+	}
+
+	for _, c := range casos {
+		t.Run(c.nome, func(t *testing.T) {
+			rec, res := a.conquistarPoligono(t, "1", c.corpo)
+			if rec.Code != c.esperaCode {
+				t.Fatalf("HTTP %d, esperado %d — corpo: %s", rec.Code, c.esperaCode, rec.Body.String())
+			}
+			if res.Sucesso {
+				t.Fatalf("esperava sucesso=false para caso de erro")
+			}
+			if res.Mensagem == "" {
+				t.Fatalf("esperava mensagem explicativa de erro no JSON")
+			}
+		})
+	}
+}
+
+func TestConquistarPoligono_MetodoNaoPermitido(t *testing.T) {
+	a := novoAmbiente(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/territorios/conquistar-poligono", nil)
+	rec := httptest.NewRecorder()
+	a.router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("esperava HTTP 405 Method Not Allowed, obteve %d", rec.Code)
+	}
+}
+

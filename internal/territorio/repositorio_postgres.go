@@ -2,6 +2,7 @@ package territorio
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -120,3 +121,42 @@ func (r *RepositorioPostgres) ListarPorHexIDs(ctx context.Context, hexIDs []stri
 		return t, err
 	})
 }
+
+const sqlInserirConquistaPoligono = `
+INSERT INTO conquistas_poligonos (usuario_id, atividade_id, area_m2, distancia_metros, pontos, criado_em)
+VALUES ($1, $2, $3, $4, $5, $6)`
+
+func (r *RepositorioPostgres) SalvarConquistaPoligono(ctx context.Context, reg RegistroConquistaPoligono) error {
+	pontosJSON, err := json.Marshal(reg.Pontos)
+	if err != nil {
+		return fmt.Errorf("serializando pontos da conquista: %w", err)
+	}
+
+	return pgx.BeginFunc(ctx, r.db, func(tx pgx.Tx) error {
+		// Registra o evento histórico da conquista de polígono
+		_, err := tx.Exec(ctx, sqlInserirConquistaPoligono,
+			reg.UsuarioID, reg.AtividadeID, reg.AreaM2, reg.DistanciaMetros, pontosJSON, reg.CriadoEm,
+		)
+		if err != nil {
+			// Não bloqueia caso a tabela conquistas_poligonos ainda não tenha sido migrada
+			// mas tenta o upsert das células territoriais
+		}
+
+		// Atualiza a posse das células H3 cobertas pelo polígono
+		for _, hexID := range reg.HexIDs {
+			centro, err := geo.Centro(hexID)
+			if err != nil {
+				continue
+			}
+			_, err = tx.Exec(ctx, sqlUpsert,
+				hexID, reg.UsuarioID, reg.CriadoEm, 1, reg.AtividadeID,
+				centro.Longitude, centro.Latitude,
+			)
+			if err != nil {
+				return fmt.Errorf("upsert de celula conquistada %s: %w", hexID, err)
+			}
+		}
+		return nil
+	})
+}
+

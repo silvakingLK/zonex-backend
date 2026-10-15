@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/zonex/backend/internal/geo"
 )
 
 // ---------- Contexto de autenticação ----------
@@ -61,6 +64,7 @@ func NovoHandler(svc *Servico, log *slog.Logger) *Handler {
 func (h *Handler) Rotas(r chi.Router) {
 	r.Get("/visiveis", h.Visiveis)
 	r.Post("/conquistar", h.Conquistar)
+	r.Post("/conquistar-poligono", h.ConquistarPoligonoHandler)
 }
 
 // Conquistar trata POST /api/territorios/conquistar.
@@ -85,6 +89,80 @@ func (h *Handler) Conquistar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	escreverJSON(w, http.StatusOK, res)
+}
+
+// ConquistarPoligonoHandler trata POST /api/territorios/conquistar-poligono (Paper.io Mode).
+func (h *Handler) ConquistarPoligonoHandler(w http.ResponseWriter, r *http.Request) {
+	// Validação explícita do método HTTP
+	if r.Method != http.MethodPost {
+		escreverJSON(w, http.StatusMethodNotAllowed, ConquerPolygonResponse{
+			Sucesso:  false,
+			Mensagem: "método não permitido, esperado POST",
+		})
+		return
+	}
+
+	// Obtenha o cabeçalho X-Usuario-ID (utilize ID padrão 1 caso não seja informado ou ocorra erro de parse)
+	usuarioID := int64(1)
+	if v := r.Header.Get("X-Usuario-ID"); v != "" {
+		if id, err := strconv.ParseInt(v, 10, 64); err == nil && id > 0 {
+			usuarioID = id
+		}
+	} else if id, ok := UsuarioDoContexto(r.Context()); ok && id > 0 {
+		usuarioID = id
+	}
+
+	var req ConquerPolygonRequest
+	// Permite até 1 MB para polígonos com muitos pontos GPS
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	if err := dec.Decode(&req); err != nil {
+		escreverJSON(w, http.StatusBadRequest, ConquerPolygonResponse{
+			Sucesso:  false,
+			Mensagem: "corpo da requisição JSON inválido: " + err.Error(),
+		})
+		return
+	}
+
+	// Valida se a lista de pontos contém ao menos 3 coordenadas para formar uma área fechada válida
+	if len(req.Pontos) < 3 {
+		escreverJSON(w, http.StatusBadRequest, ConquerPolygonResponse{
+			Sucesso:  false,
+			Mensagem: "polígono inválido: são necessárias no mínimo 3 coordenadas para formar uma área fechada válida",
+		})
+		return
+	}
+
+	// Validação das coordenadas geográficas
+	for i, p := range req.Pontos {
+		if err := geo.ValidarCoordenada(p.Latitude, p.Longitude); err != nil {
+			escreverJSON(w, http.StatusBadRequest, ConquerPolygonResponse{
+				Sucesso:  false,
+				Mensagem: fmt.Sprintf("ponto %d inválido (lat=%.6f, lng=%.6f): %v", i+1, p.Latitude, p.Longitude, err),
+			})
+			return
+		}
+	}
+
+	areaM2, _, err := h.svc.ConquistarPoligono(r.Context(), usuarioID, req)
+	if err != nil {
+		h.log.ErrorContext(r.Context(), "erro ao processar conquista de poligono", "erro", err)
+		escreverJSON(w, http.StatusInternalServerError, ConquerPolygonResponse{
+			Sucesso:  false,
+			Mensagem: "erro interno ao processar conquista de território",
+		})
+		return
+	}
+
+	escreverJSON(w, http.StatusOK, ConquerPolygonResponse{
+		Sucesso:  true,
+		Mensagem: fmt.Sprintf("Território de %.2f m² conquistado com sucesso!", areaM2),
+		AreaM2:   areaM2,
+	})
+}
+
+// ConquistarPoligono é um alias para ConquistarPoligonoHandler.
+func (h *Handler) ConquistarPoligono(w http.ResponseWriter, r *http.Request) {
+	h.ConquistarPoligonoHandler(w, r)
 }
 
 // Visiveis trata GET /api/territorios/visiveis.

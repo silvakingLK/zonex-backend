@@ -220,3 +220,75 @@ func paraStrings(indices []h3.H3Index) []string {
 	}
 	return out
 }
+
+// CalcularAreaPoligonoM2 calcula a área de um polígono geográfico (em m²)
+// usando o algoritmo de excesso esférico (Chamberlain & Duquette) na esfera terrestre WGS84.
+func CalcularAreaPoligonoM2(coords []Coordenada) float64 {
+	n := len(coords)
+	if n < 3 {
+		return 0
+	}
+	// Se o último ponto for igual ao primeiro (anel fechado), desconsidera o último ponto duplicado
+	if coords[0].Latitude == coords[n-1].Latitude && coords[0].Longitude == coords[n-1].Longitude {
+		coords = coords[:n-1]
+		n = len(coords)
+		if n < 3 {
+			return 0
+		}
+	}
+
+	const earthRadius = 6371008.8 // raio autálico da Terra (WGS84) em metros
+	const degToRad = math.Pi / 180.0
+
+	total := 0.0
+	for i := 0; i < n; i++ {
+		prev := (i + n - 1) % n
+		next := (i + 1) % n
+
+		latI := coords[i].Latitude * degToRad
+		lonNext := coords[next].Longitude * degToRad
+		lonPrev := coords[prev].Longitude * degToRad
+
+		dLon := lonNext - lonPrev
+		// Normalização para o caso de cruzar o antimeridiano
+		if dLon > math.Pi {
+			dLon -= 2 * math.Pi
+		} else if dLon < -math.Pi {
+			dLon += 2 * math.Pi
+		}
+
+		total += dLon * math.Sin(latI)
+	}
+
+	area := math.Abs(total * earthRadius * earthRadius / 2.0)
+	return area
+}
+
+// CelulasNoPoligono retorna as células H3 contidas no polígono ou que interceptam
+// seus vértices caso o polígono seja menor que uma única célula na resolução indicada.
+func CelulasNoPoligono(coords []Coordenada, res int) []string {
+	if len(coords) < 3 {
+		return nil
+	}
+	geofence := make([]h3.GeoCoord, len(coords))
+	for i, c := range coords {
+		geofence[i] = h3.GeoCoord{Latitude: c.Latitude, Longitude: c.Longitude}
+	}
+	gp := h3.GeoPolygon{Geofence: geofence}
+	indices := h3.Polyfill(gp, res)
+	celulas := paraStrings(indices)
+
+	// Se for um polígono menor que a célula e o Polyfill não capturou o centro,
+	// captura os hexágonos dos vértices para não deixar o usuário sem conquista:
+	if len(celulas) == 0 {
+		vistos := make(map[string]bool)
+		for _, c := range coords {
+			if hexID, err := ParaHex(c.Latitude, c.Longitude, res); err == nil && !vistos[hexID] {
+				vistos[hexID] = true
+				celulas = append(celulas, hexID)
+			}
+		}
+	}
+	return celulas
+}
+

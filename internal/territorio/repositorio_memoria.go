@@ -8,10 +8,11 @@ import (
 // RepositorioMemoria é uma implementação thread-safe em memória, usada em
 // testes e para rodar a API localmente sem banco (ZONEX_DB=memoria).
 type RepositorioMemoria struct {
-	mu          sync.Mutex
-	territorios map[string]Territorio
+	mu                  sync.Mutex
+	territorios         map[string]Territorio
 	// atividadesAtivas: atividadeID -> usuarioID dono da atividade em andamento.
-	atividadesAtivas map[int64]int64
+	atividadesAtivas    map[int64]int64
+	conquistasPoligonos []RegistroConquistaPoligono
 }
 
 func NovoRepositorioMemoria() *RepositorioMemoria {
@@ -73,3 +74,30 @@ func (m *RepositorioMemoria) ListarPorHexIDs(_ context.Context, hexIDs []string)
 	}
 	return out, nil
 }
+
+func (m *RepositorioMemoria) SalvarConquistaPoligono(_ context.Context, reg RegistroConquistaPoligono) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.conquistasPoligonos = append(m.conquistasPoligonos, reg)
+	for _, hexID := range reg.HexIDs {
+		dono := reg.UsuarioID
+		t := Territorio{
+			HexID:        hexID,
+			DonoID:       &dono,
+			DominadoEm:   reg.CriadoEm,
+			PontosDefesa: 1,
+			AtividadeID:  reg.AtividadeID,
+		}
+		m.territorios[hexID] = t
+	}
+	return nil
+}
+
+func (m *RepositorioMemoria) ListarConquistasPoligono() []RegistroConquistaPoligono {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]RegistroConquistaPoligono, len(m.conquistasPoligonos))
+	copy(out, m.conquistasPoligonos)
+	return out
+}
+

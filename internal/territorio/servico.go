@@ -166,3 +166,49 @@ func (s *Servico) Visiveis(ctx context.Context, a AreaConsulta) (RespostaVisivei
 	}
 	return resp, nil
 }
+
+// ConquistarPoligono processa a conquista livre de território delimitado por um polígono fechado (Paper.io Mode).
+func (s *Servico) ConquistarPoligono(ctx context.Context, usuarioID int64, req ConquerPolygonRequest) (float64, []string, error) {
+	if usuarioID <= 0 {
+		return 0, nil, ErrNaoAutenticado
+	}
+	if len(req.Pontos) < 3 {
+		return 0, nil, fmt.Errorf("%w: são necessárias no mínimo 3 coordenadas", ErrRequisicao)
+	}
+
+	coords := make([]geo.Coordenada, len(req.Pontos))
+	for i, p := range req.Pontos {
+		if err := geo.ValidarCoordenada(p.Latitude, p.Longitude); err != nil {
+			return 0, nil, fmt.Errorf("%w: ponto %d inválido: %v", ErrRequisicao, i+1, err)
+		}
+		coords[i] = geo.Coordenada{Latitude: p.Latitude, Longitude: p.Longitude}
+	}
+
+	// Calcula a área em m²
+	areaM2 := geo.CalcularAreaPoligonoM2(coords)
+
+	// Extrai as células H3 contidas no polígono
+	hexIDs := geo.CelulasNoPoligono(coords, s.cfg.Resolucao)
+
+	var ativID *int64
+	if req.AtividadeID > 0 {
+		ativID = &req.AtividadeID
+	}
+
+	reg := RegistroConquistaPoligono{
+		UsuarioID:       usuarioID,
+		AtividadeID:     ativID,
+		AreaM2:          areaM2,
+		DistanciaMetros: req.DistanciaMetros,
+		Pontos:          req.Pontos,
+		HexIDs:          hexIDs,
+		CriadoEm:        s.agora(),
+	}
+
+	if err := s.repo.SalvarConquistaPoligono(ctx, reg); err != nil {
+		return 0, nil, fmt.Errorf("salvando conquista de polígono: %w", err)
+	}
+
+	return areaM2, hexIDs, nil
+}
+

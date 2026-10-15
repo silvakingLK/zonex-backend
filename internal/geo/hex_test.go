@@ -193,3 +193,46 @@ func duplicado(lista []string) string {
 	}
 	return ""
 }
+
+func TestCalcularAreaPoligonoM2(t *testing.T) {
+	// Retângulo em São Paulo:
+	// Altura: 0.001 grau de latitude ≈ 111.32 metros
+	// Largura: 0.001 grau de longitude ≈ 111.32 * cos(-23.56°) ≈ 102.04 metros
+	// Área aproximada: 111.32 * 102.04 ≈ 11,360 m²
+	coords := []Coordenada{
+		{Latitude: spLat, Longitude: spLng},
+		{Latitude: spLat, Longitude: spLng + 0.001},
+		{Latitude: spLat + 0.001, Longitude: spLng + 0.001},
+		{Latitude: spLat + 0.001, Longitude: spLng},
+	}
+	area := CalcularAreaPoligonoM2(coords)
+	if area < 11000 || area > 11800 {
+		t.Fatalf("área calculada fora do esperado: %.2f m²", area)
+	}
+
+	// Com ponto de fechamento repetido (anel fechado) o resultado deve ser idêntico
+	coordsFechadas := append(coords, coords[0])
+	areaFechada := CalcularAreaPoligonoM2(coordsFechadas)
+	if math.Abs(area-areaFechada) > 0.001 {
+		t.Fatalf("área de anel fechado diverge: %.2f vs %.2f", area, areaFechada)
+	}
+
+	// Menos de 3 pontos retorna 0
+	if a := CalcularAreaPoligonoM2(coords[:2]); a != 0 {
+		t.Fatalf("esperava 0 para menos de 3 pontos, obteve %f", a)
+	}
+}
+
+func TestCelulasNoPoligono(t *testing.T) {
+	coords := []Coordenada{
+		{Latitude: spLat, Longitude: spLng},
+		{Latitude: spLat, Longitude: spLng + 0.005},
+		{Latitude: spLat + 0.005, Longitude: spLng + 0.005},
+		{Latitude: spLat + 0.005, Longitude: spLng},
+	}
+	celulas := CelulasNoPoligono(coords, ResolucaoPadrao)
+	if len(celulas) == 0 {
+		t.Fatal("esperava células conquistadas pelo polígono")
+	}
+}
+

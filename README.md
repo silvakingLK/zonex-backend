@@ -52,6 +52,32 @@ chamando `territorio.ComUsuario(ctx, userID)`.
 Resposta `200`: `hex_id`, `status`, `dono_id`, `dono_anterior_id`, `pontos_defesa`, `dominado_em`, `poligono`.
 Erros: `400` payload/coordenada inválidos · `401` sem usuário · `403` atividade inexistente/de outro usuário/não `em_andamento`.
 
+### `POST /api/territorios/conquistar-poligono` (Paper.io Mode)
+Conquista livre delimitada por um trajeto/polígono fechado desenhado na corrida.
+```json
+{
+  "atividadeId": 10,
+  "pontos": [
+    { "latitude": -23.561414, "longitude": -46.655881 },
+    { "latitude": -23.561414, "longitude": -46.653881 },
+    { "latitude": -23.559414, "longitude": -46.653881 },
+    { "latitude": -23.559414, "longitude": -46.655881 }
+  ],
+  "distanciaMetros": 520.5
+}
+```
+Headers: `Content-Type: application/json`, `X-Usuario-ID: 1` (opcional; padrão 1).
+Resposta `200`:
+```json
+{
+  "sucesso": true,
+  "mensagem": "Território de 44852.12 m² conquistado com sucesso!",
+  "areaM2": 44852.12
+}
+```
+Erros: `400` se a lista de coordenadas tiver menos de 3 pontos ou coordenadas inválidas.
+
+
 ## Rodando
 
 > **H3 exige cgo.** No Windows é preciso um GCC **64-bit** (ex.: MSYS2 `mingw-w64-ucrt-x86_64-gcc`, ou TDM-GCC 64).

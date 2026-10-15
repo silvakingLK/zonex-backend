@@ -100,4 +100,42 @@ type Repositorio interface {
 
 	// ListarPorHexIDs retorna os territórios dominados dentre os IDs informados.
 	ListarPorHexIDs(ctx context.Context, hexIDs []string) ([]Territorio, error)
+
+	// SalvarConquistaPoligono registra a conquista de polígono e atualiza a posse das células cobertas.
+	SalvarConquistaPoligono(ctx context.Context, reg RegistroConquistaPoligono) error
 }
+
+// ---------- DTOs para Conquista de Territórios Livres por Polígono (Paper.io Mode) ----------
+
+// PointDto representa uma coordenada geográfica enviada pelo app.
+type PointDto struct {
+	Latitude  float64 `json:"latitude"`
+	Longitude float64 `json:"longitude"`
+}
+
+// ConquerPolygonRequest recebe o payload de conquista por polígono.
+type ConquerPolygonRequest struct {
+	AtividadeID     int64      `json:"atividadeId"`
+	Pontos          []PointDto `json:"pontos"`
+	DistanciaMetros float32    `json:"distanciaMetros"`
+}
+
+// ConquerPolygonResponse retorna o resultado da operação de conquista ao cliente.
+type ConquerPolygonResponse struct {
+	Sucesso  bool    `json:"sucesso"`
+	Mensagem string  `json:"mensagem"`
+	AreaM2   float64 `json:"areaM2,omitempty"`
+}
+
+// RegistroConquistaPoligono representa a persistência do polígono conquistado.
+type RegistroConquistaPoligono struct {
+	ID              int64      `json:"id,omitempty"`
+	UsuarioID       int64      `json:"usuario_id"`
+	AtividadeID     *int64     `json:"atividade_id,omitempty"`
+	AreaM2          float64    `json:"area_m2"`
+	DistanciaMetros float32    `json:"distancia_metros"`
+	Pontos          []PointDto `json:"pontos"`
+	HexIDs          []string   `json:"hex_ids,omitempty"`
+	CriadoEm        time.Time  `json:"criado_em"`
+}
+

@@ -46,6 +46,7 @@ func run(log *slog.Logger) error {
 	h := territorio.NovoHandler(svc, log)
 
 	r := chi.NewRouter()
+	r.Use(middlewareCORS)
 	r.Use(middleware.RequestID, middleware.RealIP, middleware.Recoverer, middleware.Timeout(10*time.Second))
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
 	r.Route("/api", func(api chi.Router) {
@@ -53,6 +54,7 @@ func run(log *slog.Logger) error {
 		api.Use(territorio.MiddlewareUsuarioHeaderDev)
 		api.Route("/territorios", h.Rotas)
 	})
+
 
 	porta := os.Getenv("PORT")
 	if porta == "" {
@@ -106,3 +108,22 @@ func abrirRepositorio(ctx context.Context, log *slog.Logger) (territorio.Reposit
 	}
 	return territorio.NovoRepositorioPostgres(pool), pool.Close, nil
 }
+
+// middlewareCORS configura os headers CORS para permitir que clientes web e apps mobile
+// acessem a API com os headers customizados necessários (ex: Content-Type, X-Usuario-ID).
+func middlewareCORS(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type, X-CSRF-Token, X-Usuario-ID")
+		w.Header().Set("Access-Control-Expose-Headers", "Link")
+
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
